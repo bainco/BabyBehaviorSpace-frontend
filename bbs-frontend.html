@@ -1,0 +1,446 @@
+<html>
+<head>
+   <link rel="stylesheet" media="screen" href= "http://netlogoweb.org/assets/lib/codemirror/lib/codemirror.css">
+   <script src="http://netlogoweb.org/assets/lib/codemirror/lib/codemirror.js"></script>
+   <script src="http://netlogoweb.org/assets/lib/codemirror/addon/mode/simple.js"></script>
+   <script src="http://netlogoweb.org/assets/javascripts/codemirror/mode.js"></script>
+   <style>
+
+   .netlogo-ugly-button {
+      text-align: center;
+      background-color: rgb(240, 240, 240);
+      border-color: rgb(238, 238, 238);
+   }
+
+   .cm-s-netlogo-bbs {
+      border: 2px solid #eee;
+      height: 120px;
+   }
+   .cm-s-netlogo-default .cm-reporter,
+   .cm-s-netlogo-bbs .cm-reporter {
+      color: #660096;
+   }
+   .cm-s-netlogo-deafult .cm-command,
+   .cm-s-netlogo-bbs .cm-command {
+      color: #0000AA;
+   }
+   .cm-s-netlogo-default .cm-keyword,
+   .cm-s-netlogo-bbs .cm-keyword {
+      color: #007F69;
+   }
+   .cm-s-netlogo-default .cm-comment,
+   .cm-s-netlogo-bbs .cm-comment {
+      color: #5A5A5A;
+   }
+   .cm-s-netlogo-default .cm-string,
+   .cm-s-netlogo-default .cm-number,
+   .cm-s-netlogo-default .cm-constant,
+   .cm-s-netlogo-bbs .cm-string,
+   .cm-s-netlogo-bbs .cm-number,
+   .cm-s-netlogo-bbs .cm-constant {
+      color: #963700;
+   }
+
+   /* The Modal (background) */
+   .modal {
+      display: none; /* Hidden by default */
+      position: fixed; /* Stay in place */
+      z-index: 1; /* Sit on top */
+      padding-top: 35px; /* Location of the box */
+      left: 0;
+      top: 0;
+      width: 100%; /* Full width */
+      height: 100%; /* Full height */
+      overflow: auto; /* Enable scroll if needed */
+      background-color: rgb(0,0,0); /* Fallback color */
+      background-color: rgba(0,0,0,0.4); /* Black w/ opacity */
+   }
+
+   /* Modal Content */
+   .modal-content {
+      position: relative;
+      background-color: #fefefe;
+      margin: auto;
+      padding: 0;
+      border: 1px solid #888;
+      width: 50%;
+      overflow:scroll;
+      box-shadow: 0 4px 8px 0 rgba(0,0,0,0.2),0 6px 20px 0 rgba(0,0,0,0.19);
+      -webkit-animation-name: animatetop;
+      -webkit-animation-duration: 0.4s;
+      animation-name: animatetop;
+      animation-duration: 0.4s
+   }
+
+   /* Add Animation */
+   @-webkit-keyframes animatetop {
+      from {top:-300px; opacity:0}
+      to {top:0; opacity:1}
+   }
+
+   @keyframes animatetop {
+      from {top:-300px; opacity:0}
+      to {top:0; opacity:1}
+   }
+
+   /* The Close Button */
+   .close {
+      color: white;
+      float: right;
+      font-size: 28px;
+      font-weight: bold;
+   }
+
+   .close:hover,
+   .close:focus {
+      color: #000;
+      text-decoration: none;
+      cursor: pointer;
+   }
+
+   .modal-header {
+      padding: 2px 16px;
+      background-color: #5cb85c;
+      color: white;
+   }
+
+   .modal-body {padding: 2px 16px;}
+
+   .modal-footer {
+      padding: 2px 16px;
+      background-color: #5cb85c;
+      color: white;
+   }
+   </style>
+</head>
+
+<h2>BehaviorSpace Tester</h2>
+
+<!-- Trigger/Open The Modal -->
+<button id="bbsBtn">New Experiment</button><br>
+
+<iframe height="1000px" width="1000px" id="model-container" src="Bacteria-Food-Hunt---Natural-Selection.html"></iframe>
+
+<!-- The Modal -->
+<div id="bbs-dialog" class="modal">
+
+   <!-- Modal content -->
+   <div class="modal-content">
+      <div class="modal-header">
+         <span class="close">&times;</span>
+         <h2>New BehaviorSpace Experiment</h2>
+      </div>
+      <div class="modal-body">
+         <p>Vary variables as follows...</p>
+         <div id="bbs-variable-config" ><textarea class="nl-code-bbs">["#-phenotypes" [1 4 1]]</textarea></div>
+         <p>Repetitions: <input id="bbs-repetitions" style="width: 60px;"  type="number" value=2> </p>
+         <p>Measure runs with these reporters...</p>
+         <div id="bbs-metrics"><textarea class="nl-code-bbs">count turtles</textarea></div>
+         <p>Time Limit: <input id="bbs-time-limit" style="width: 60px;" type="number" value=10></p>
+      </div>
+      <div align="right" class="modal-footer">
+         <p></p>
+         <button class="netlogo-widget netlogo-ugly-button" onclick="parseBBSConfig()">Run Experiment</button>
+         <p></p>
+      </div>
+   </div>
+
+</div>
+
+<script>
+
+window.addEventListener("message", function (e) {
+  if (e.data.type === "baby-behaviorspace-results") {
+
+    //console.log(e.data.data);
+
+    DownloadJSON2CSV(e.data.data);
+
+    //console.log(JSON.stringify(e.data.data));
+  }
+});
+
+function qsa(sel) {
+   return Array.apply(null, document.querySelectorAll(sel));
+}
+
+
+/// TYPO IN DOCUMENTATION
+
+
+/*
+type BehaviorSpaceConfig =
+  {
+    parameterSet:        { type: "discreteCombos",   combos:    Array[Object[Any]]    }
+                       | { type: "cartesianProduct", variables: Array[VariableConfig] }
+    repetitionsPerCombo: Number
+    metrics:             Object[Metric]
+    setupCode:               () => Unit
+    goCode:                  () => Unit
+    stopConditionCode:       () => Boolean
+    iterationLimit:      Number
+}
+
+type Metric = {
+  interval: Number
+, reporter: () => Any
+}
+*/
+
+function parseBBSConfig() {
+   var rawParameters = document.getElementById("bbs-variable-config").children[1].CodeMirror.getValue();
+
+   var rawMetrics = document.getElementById("bbs-metrics").children[1].CodeMirror.getValue();
+   //stopConditions = document.getElementById("bbs-stop-conditions").children[1].CodeMirror.getValue();
+
+   var rawParameterLines = rawParameters.match(/[^\r\n]+/g);
+
+   var variableSpaces = [];
+   for (var i = 0; i < rawParameterLines.length; i++) {
+      if (rawParameterLines[i] != "") {
+
+         var result = parseArgLine(rawParameterLines[i]);
+
+         if (result == -1) {
+            // PARSE ERROR
+         }
+
+         variableSpaces[variableSpaces.length] = result
+      }
+   }
+
+   var theParameterSet = new Object();
+   theParameterSet.type = "cartesianProduct";
+   theParameterSet.variables = variableSpaces;
+
+   var theBBSConfig = new Object();
+   theBBSConfig.parameterSet = theParameterSet;
+
+   var numRepetitions = document.getElementById("bbs-repetitions").value;
+   if ((numRepetitions == "") || (numRepetitions.includes("."))) {
+      // ERROR: Invalid repetitions
+   }
+   theBBSConfig.repetitionsPerCombo = parseInt(numRepetitions);
+
+   // HARD CODED SOME options
+
+   theBBSConfig.setupCode = "setup";
+   theBBSConfig.goCode = "go";
+   theBBSConfig.stopConditionCode = "";
+
+   var theTickLimit = document.getElementById("bbs-time-limit").value;
+   if ((theTickLimit == "") || (theTickLimit.includes("."))) {
+      // ERROR: Invalid repetitions
+   }
+   theBBSConfig.iterationLimit = parseInt(theTickLimit);
+
+   var rawMetricLines = rawMetrics.match(/[^\r\n]+/g);
+   var theMetrics = [];
+   for (var i = 0; i < rawMetricLines.length; i++) {
+      if (rawMetricLines[i] != "") {
+
+         var temp = new Object();
+         temp.reporter = rawMetricLines[i];
+         temp.interval = theBBSConfig.iterationLimit; // ONLY MEASURES AT THE END
+         theMetrics[theMetrics.length] = temp;
+      }
+   }
+   theBBSConfig.metrics = theMetrics;
+
+//   console.log(theBBSConfig);
+
+   document.getElementById('model-container').contentWindow.postMessage({ type: "run-baby-behaviorspace", config: theBBSConfig }, "*")
+
+   //alert("Success");
+}
+
+// Get the modal
+var modal = document.getElementById('bbs-dialog');
+
+// Get the button that opens the modal
+var btn = document.getElementById("bbsBtn");
+
+// Get the <span> element that closes the modal
+var span = document.getElementsByClassName("close")[0];
+
+// When the user clicks the button, open the modal
+btn.onclick = function() {
+   modal.style.display = "block";
+}
+
+// When the user clicks on <span> (x), close the modal
+span.onclick = function() {
+   modal.style.display = "none";
+}
+
+// When the user clicks anywhere outside of the modal, close it
+window.onclick = function(event) {
+   if (event.target == modal) {
+      modal.style.display = "none";
+   }
+   qsa(".CodeMirror").forEach(function (cmEl) {
+      cmEl.CodeMirror.refresh();
+   });
+}
+
+qsa(".nl-code-bbs").forEach(function (editorEl) {
+   var test = CodeMirror.fromTextArea(editorEl, {
+      mode:            'netlogo',
+      theme:           'netlogo-bbs',
+      styleActiveLine: true,
+      matchBrackets:   true,
+      viewportMargin:  Infinity,
+      showCursorWhenSelecting: true
+   });
+});
+
+/*
+type VariableConfig = {
+name:           String
+parameterSpace: { type: "discreteValues", values: Array[Any] }
+| { type: "range", min: Number, max: Number, interval: Number }
+}
+
+*/
+
+// DOESN"T DEAL WITH CASE WHERE YOU HAVE MULTIPLE PARAMS ON SAME LINE
+function parseArgLine(input) {
+
+   var variableConfig = new Object();
+   var theParamSpace = new Object();
+
+   input = input.trim();
+   if ((input[0] != "[") || (input[input.length - 1] != "]")) {
+      // ERROR: NO BRACKETS AROUND VARIABLE
+      alert("Error: no brackets around parameter space for variable.");
+      return -1;
+   }
+
+   var command = input.substring(1, input.length - 1)
+   command = command.trim();
+
+   var commandTree = command.split(" ");
+
+   var theName = commandTree[0];
+   theName = theName.trim();
+
+   if ((theName[0] != "\"") || (theName[theName.length - 1] != "\"")) {
+
+      // ERROR: No QUOTES AROUND VARIABLE NAME
+      alert("Error: no quotes around variable name.");
+      return -1;
+   }
+
+   // Save variable name and remove quotes
+   variableConfig.name = commandTree[0].replace(/['"]+/g, '');
+
+   // If we have brackets we need to parse the iterator
+   if (command.includes("[") || command.includes("]")) {
+
+      var regex = /\[(.*?)\]/;
+      var matched = regex.exec(command);
+
+      if (matched.length != 2) {
+         // ERROR, NO VALID ITERATOR
+         alert("Error: no valid iterator found");
+         return -1;
+      }
+
+      var iteratorPart = matched[1];
+
+      iteratorPart = iteratorPart.trim();
+      var splitIterator = iteratorPart.split(" ");
+
+      var extractedValues = [];
+      for (var i = 0; i < splitIterator.length; i++) {
+         if (splitIterator[i] != "") {
+            extractedValues[extractedValues.length] = splitIterator[i];
+         }
+      }
+
+      if (extractedValues.length != 3) {
+         // ERROR: NO VALID ITERATOR FOUND
+         alert("Error: no valid iterator found.");
+         return -1;
+      }
+
+      var min  = extractedValues[0];
+      var step  = extractedValues[1];
+      var max = extractedValues[2];
+
+      theParamSpace.type = "range";
+      theParamSpace.min = parseInt(min);
+      theParamSpace.max = parseInt(max);
+      theParamSpace.interval = parseInt(step);
+
+   }
+
+   // Otherwise it is just a list of options
+   else {
+      var options = [];
+      for (var i = 1; i < commandTree.length; i++) {
+         if (commandTree[i] != "") {
+            options[options.length] = commandTree[i];
+         }
+      }
+
+      if (options.length == 0) {
+         // ERROR: no options
+         alert("Error: you need to specify at least one value");
+         return -1;
+      }
+
+      theParamSpace.type = "discreteValues";
+      theParamSpace.values = options;
+   }
+
+   variableConfig.parameterSpace = theParamSpace;
+
+   return variableConfig;
+}
+
+/*
+[{"config":{"#-phenotypes":1,"initial-#-bacteria-per-phenotype":"6"},"results":{"0":{"count turtles":1052,"count bacteria":6},"10":{"count turtles":1052,"count bacteria":6}}},{"config":{"#-phenotypes":1,"initial-#-bacteria-per-phenotype":"6"},"results":{"0":{"count turtles":1052,"count bacteria":6},"10":{"count turtles":1052,"count bacteria":6}}},{"config":{"#-phenotypes":1,"initial-#-bacteria-per-phenotype":"8"},"results":{"0":{"count turtles":1056,"count bacteria":8},"10":{"count turtles":1056,"count bacteria":8}}},{"config":{"#-phenotypes":1,"initial-#-bacteria-per-phenotype":"8"},"results":{"0":{"count turtles":1056,"count bacteria":8},"10":{"count turtles":1056,"count bacteria":8}}},{"config":{"#-phenotypes":2,"initial-#-bacteria-per-phenotype":"6"},"results":{"0":{"count turtles":1064,"count bacteria":12},"10":{"count turtles":1064,"count bacteria":12}}},{"config":{"#-phenotypes":2,"initial-#-bacteria-per-phenotype":"6"},"results":{"0":{"count turtles":1064,"count bacteria":12},"10":{"count turtles":1064,"count bacteria":12}}},{"config":{"#-phenotypes":2,"initial-#-bacteria-per-phenotype":"8"},"results":{"0":{"count turtles":1072,"count bacteria":16},"10":{"count turtles":1072,"count bacteria":16}}},{"config":{"#-phenotypes":2,"initial-#-bacteria-per-phenotype":"8"},"results":{"0":{"count turtles":1072,"count bacteria":16},"10":{"count turtles":1072,"count bacteria":16}}}]
+*/
+
+function DownloadJSON2CSV(objArray){
+
+      var parameters = [];
+      var metrics = [];
+
+      var csv = "[run number]";
+
+      for (variable in objArray[0].config) {
+         csv += ("," + variable);
+         parameters[parameters.length] = variable;
+      }
+      csv += (",[step]");
+
+      // THIS WOULD NEED TO CHANGE IF WE DON'T HAVE 0th TICK
+      for (variable in objArray[0].results["0"]) {
+         csv += ("," + variable);
+         metrics[metrics.length] = variable;
+      }
+
+      csv += '\r\n';
+
+      for (var i = 0; i < objArray.length; i++) {
+
+         var line = "" + i;
+         for (var j = 0; j < parameters.length; j++) {
+            line += "," + objArray[i].config[parameters[j]];
+         }
+
+         for (stepNum in objArray[i].results) {
+            var stepSubsection = "," + stepNum;
+            for (var j = 0; j < metrics.length; j++) {
+               stepSubsection += "," + objArray[i].results[stepNum][metrics[j]];
+            }
+            csv += line + stepSubsection + '\r\n';
+         }
+      }
+
+      window.open( "data:text/csv;charset=utf-8," + escape(csv))
+   }
+</script>
+</html>
