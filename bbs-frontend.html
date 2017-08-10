@@ -4,8 +4,253 @@
    <script src="http://netlogoweb.org/assets/lib/codemirror/lib/codemirror.js"></script>
    <script src="http://netlogoweb.org/assets/lib/codemirror/addon/mode/simple.js"></script>
    <script src="http://netlogoweb.org/assets/javascripts/codemirror/mode.js"></script>
-   <style>
+   <script>/* FileSaver.js
+   * A saveAs() FileSaver implementation.
+   * 2014-12-17
+   *
+   * By Eli Grey, http://eligrey.com
+   * License: X11/MIT
+   *   See https://github.com/eligrey/FileSaver.js/blob/master/LICENSE.md
+   */
 
+   /*global self */
+   /*jslint bitwise: true, indent: 4, laxbreak: true, laxcomma: true, smarttabs: true, plusplus: true */
+
+   /*! @source http://purl.eligrey.com/github/FileSaver.js/blob/master/FileSaver.js */
+
+   var saveAs = saveAs
+   // IE 10+ (native saveAs)
+   || (typeof navigator !== "undefined" &&
+     navigator.msSaveOrOpenBlob && navigator.msSaveOrOpenBlob.bind(navigator))
+   // Everyone else
+   || (function(view) {
+   "use strict";
+   // IE <10 is explicitly unsupported
+   if (typeof navigator !== "undefined" &&
+      /MSIE [1-9]\./.test(navigator.userAgent)) {
+     return;
+   }
+   var
+       doc = view.document
+       // only get URL when necessary in case Blob.js hasn't overridden it yet
+     , get_URL = function() {
+        return view.URL || view.webkitURL || view;
+     }
+     , save_link = doc.createElementNS("http://www.w3.org/1999/xhtml", "a")
+     , can_use_save_link = "download" in save_link
+     , click = function(node) {
+        var event = doc.createEvent("MouseEvents");
+        event.initMouseEvent(
+           "click", true, false, view, 0, 0, 0, 0, 0
+           , false, false, false, false, 0, null
+        );
+        node.dispatchEvent(event);
+     }
+     , webkit_req_fs = view.webkitRequestFileSystem
+     , req_fs = view.requestFileSystem || webkit_req_fs || view.mozRequestFileSystem
+     , throw_outside = function(ex) {
+        (view.setImmediate || view.setTimeout)(function() {
+           throw ex;
+        }, 0);
+     }
+     , force_saveable_type = "application/octet-stream"
+     , fs_min_size = 0
+     // See https://code.google.com/p/chromium/issues/detail?id=375297#c7 and
+     // https://github.com/eligrey/FileSaver.js/commit/485930a#commitcomment-8768047
+     // for the reasoning behind the timeout and revocation flow
+     , arbitrary_revoke_timeout = 500 // in ms
+     , revoke = function(file) {
+        var revoker = function() {
+           if (typeof file === "string") { // file is an object URL
+              get_URL().revokeObjectURL(file);
+           } else { // file is a File
+              file.remove();
+           }
+        };
+        if (view.chrome) {
+           revoker();
+        } else {
+           setTimeout(revoker, arbitrary_revoke_timeout);
+        }
+     }
+     , dispatch = function(filesaver, event_types, event) {
+        event_types = [].concat(event_types);
+        var i = event_types.length;
+        while (i--) {
+           var listener = filesaver["on" + event_types[i]];
+           if (typeof listener === "function") {
+              try {
+                 listener.call(filesaver, event || filesaver);
+              } catch (ex) {
+                 throw_outside(ex);
+              }
+           }
+        }
+     }
+     , FileSaver = function(blob, name) {
+        // First try a.download, then web filesystem, then object URLs
+        var
+             filesaver = this
+           , type = blob.type
+           , blob_changed = false
+           , object_url
+           , target_view
+           , dispatch_all = function() {
+              dispatch(filesaver, "writestart progress write writeend".split(" "));
+           }
+           // on any filesys errors revert to saving with object URLs
+           , fs_error = function() {
+              // don't create more object URLs than needed
+              if (blob_changed || !object_url) {
+                 object_url = get_URL().createObjectURL(blob);
+              }
+              if (target_view) {
+                 target_view.location.href = object_url;
+              } else {
+                 var new_tab = view.open(object_url, "_blank");
+                 if (new_tab == undefined && typeof safari !== "undefined") {
+                    //Apple do not allow window.open, see http://bit.ly/1kZffRI
+                    view.location.href = object_url
+                 }
+              }
+              filesaver.readyState = filesaver.DONE;
+              dispatch_all();
+              revoke(object_url);
+           }
+           , abortable = function(func) {
+              return function() {
+                 if (filesaver.readyState !== filesaver.DONE) {
+                    return func.apply(this, arguments);
+                 }
+              };
+           }
+           , create_if_not_found = {create: true, exclusive: false}
+           , slice
+        ;
+        filesaver.readyState = filesaver.INIT;
+        if (!name) {
+           name = "download";
+        }
+        if (can_use_save_link) {
+           object_url = get_URL().createObjectURL(blob);
+           save_link.href = object_url;
+           save_link.download = name;
+           click(save_link);
+           filesaver.readyState = filesaver.DONE;
+           dispatch_all();
+           revoke(object_url);
+           return;
+        }
+        // Object and web filesystem URLs have a problem saving in Google Chrome when
+        // viewed in a tab, so I force save with application/octet-stream
+        // http://code.google.com/p/chromium/issues/detail?id=91158
+        // Update: Google errantly closed 91158, I submitted it again:
+        // https://code.google.com/p/chromium/issues/detail?id=389642
+        if (view.chrome && type && type !== force_saveable_type) {
+           slice = blob.slice || blob.webkitSlice;
+           blob = slice.call(blob, 0, blob.size, force_saveable_type);
+           blob_changed = true;
+        }
+        // Since I can't be sure that the guessed media type will trigger a download
+        // in WebKit, I append .download to the filename.
+        // https://bugs.webkit.org/show_bug.cgi?id=65440
+        if (webkit_req_fs && name !== "download") {
+           name += ".download";
+        }
+        if (type === force_saveable_type || webkit_req_fs) {
+           target_view = view;
+        }
+        if (!req_fs) {
+           fs_error();
+           return;
+        }
+        fs_min_size += blob.size;
+        req_fs(view.TEMPORARY, fs_min_size, abortable(function(fs) {
+           fs.root.getDirectory("saved", create_if_not_found, abortable(function(dir) {
+              var save = function() {
+                 dir.getFile(name, create_if_not_found, abortable(function(file) {
+                    file.createWriter(abortable(function(writer) {
+                       writer.onwriteend = function(event) {
+                          target_view.location.href = file.toURL();
+                          filesaver.readyState = filesaver.DONE;
+                          dispatch(filesaver, "writeend", event);
+                          revoke(file);
+                       };
+                       writer.onerror = function() {
+                          var error = writer.error;
+                          if (error.code !== error.ABORT_ERR) {
+                             fs_error();
+                          }
+                       };
+                       "writestart progress write abort".split(" ").forEach(function(event) {
+                          writer["on" + event] = filesaver["on" + event];
+                       });
+                       writer.write(blob);
+                       filesaver.abort = function() {
+                          writer.abort();
+                          filesaver.readyState = filesaver.DONE;
+                       };
+                       filesaver.readyState = filesaver.WRITING;
+                    }), fs_error);
+                 }), fs_error);
+              };
+              dir.getFile(name, {create: false}, abortable(function(file) {
+                 // delete file if it already exists
+                 file.remove();
+                 save();
+              }), abortable(function(ex) {
+                 if (ex.code === ex.NOT_FOUND_ERR) {
+                    save();
+                 } else {
+                    fs_error();
+                 }
+              }));
+           }), fs_error);
+        }), fs_error);
+     }
+     , FS_proto = FileSaver.prototype
+     , saveAs = function(blob, name) {
+        return new FileSaver(blob, name);
+     }
+   ;
+   FS_proto.abort = function() {
+     var filesaver = this;
+     filesaver.readyState = filesaver.DONE;
+     dispatch(filesaver, "abort");
+   };
+   FS_proto.readyState = FS_proto.INIT = 0;
+   FS_proto.WRITING = 1;
+   FS_proto.DONE = 2;
+
+   FS_proto.error =
+   FS_proto.onwritestart =
+   FS_proto.onprogress =
+   FS_proto.onwrite =
+   FS_proto.onabort =
+   FS_proto.onerror =
+   FS_proto.onwriteend =
+     null;
+
+   return saveAs;
+   }(
+     typeof self !== "undefined" && self
+   || typeof window !== "undefined" && window
+   || this.content
+   ));
+   // `self` is undefined in Firefox for Android content script context
+   // while `this` is nsIContentFrameMessageManager
+   // with an attribute `content` that corresponds to the window
+
+   if (typeof module !== "undefined" && module.exports) {
+   module.exports = saveAs;
+   } else if ((typeof define !== "undefined" && define !== null) && (define.amd != null)) {
+   define([], function() {
+   return saveAs;
+   });
+   }
+   </script>
+
+   <style>
    .netlogo-ugly-button {
       text-align: center;
       background-color: rgb(240, 240, 240);
@@ -20,7 +265,7 @@
    .cm-s-netlogo-bbs .cm-reporter {
       color: #660096;
    }
-   .cm-s-netlogo-deafult .cm-command,
+   .cm-s-netlogo-default .cm-command,
    .cm-s-netlogo-bbs .cm-command {
       color: #0000AA;
    }
@@ -42,7 +287,7 @@
    }
 
    /* The Modal (background) */
-   .modal {
+   .bbs-modal {
       display: none; /* Hidden by default */
       position: fixed; /* Stay in place */
       z-index: 1; /* Sit on top */
@@ -57,7 +302,7 @@
    }
 
    /* Modal Content */
-   .modal-content {
+   .bbs-modal-content {
       position: relative;
       background-color: #fefefe;
       margin: auto;
@@ -66,145 +311,183 @@
       width: 50%;
       overflow:scroll;
       box-shadow: 0 4px 8px 0 rgba(0,0,0,0.2),0 6px 20px 0 rgba(0,0,0,0.19);
-      -webkit-animation-name: animatetop;
+      -webkit-animation-name: bbs-animatetop;
       -webkit-animation-duration: 0.4s;
-      animation-name: animatetop;
+      animation-name: bbs-animatetop;
       animation-duration: 0.4s
    }
 
    /* Add Animation */
-   @-webkit-keyframes animatetop {
+   @-webkit-keyframes bbs-animatetop {
       from {top:-300px; opacity:0}
       to {top:0; opacity:1}
    }
 
-   @keyframes animatetop {
+   @keyframes bbs-animatetop {
       from {top:-300px; opacity:0}
       to {top:0; opacity:1}
    }
 
    /* The Close Button */
-   .close {
-      color: white;
+   .bbs-close {
+      color: black;
       float: right;
+      padding-top: 2%;
       font-size: 28px;
       font-weight: bold;
    }
 
-   .close:hover,
-   .close:focus {
-      color: #000;
+   .bbs-close:hover,
+   .bbs-close:focus {
+      color: white;
       text-decoration: none;
       cursor: pointer;
    }
 
-   .modal-header {
+   .bbs-modal-header {
+      font-family: "Lucida Grande", sans-serif;
       padding: 2px 16px;
-      background-color: #5cb85c;
-      color: white;
+      background-color: #8FE585;
+      color: black;
    }
 
-   .modal-body {padding: 2px 16px;}
-
-   .modal-footer {
+   .bbs-modal-body {
       padding: 2px 16px;
-      background-color: #5cb85c;
-      color: white;
+   }
+
+   .bbs-modal-footer {
+      padding: 2px 16px;
+      background-color: #8FE585;
+      color: black;
+   }
+
+   .bbs-header .bbs-text {
+      font-family: "Lucida Grande", sans-serif;
+   }
+
+   .bbs-header {
+      font-size: large;
+   }
+   .bbs-text {
+      font-size: small;
    }
    </style>
 </head>
 
 <h2>BehaviorSpace Tester</h2>
 
-<!-- Trigger/Open The Modal -->
-<button id="bbsBtn">New Experiment</button><br>
+<button onclick="openBBS()">New Experiment</button><br>
 
-<iframe height="1000px" width="1000px" id="model-container" src="Bacteria-Food-Hunt---Natural-Selection.html"></iframe>
+<iframe height="1000px" width="1000px" id="model-container" src="Connected-Chemistry-6-Volume-and-Pressure-with-BS.html"></iframe>
 
-<!-- The Modal -->
-<div id="bbs-dialog" class="modal">
-
-   <!-- Modal content -->
-   <div class="modal-content">
-      <div class="modal-header">
-         <span class="close">&times;</span>
-         <h2>New BehaviorSpace Experiment</h2>
+<!-- BBS Dialog -->
+<div id="bbs-dialog" class="bbs-modal">
+   <!-- Dialog content -->
+   <div class="bbs-modal-content">
+      <div class="bbs-modal-header">
+         <span class="bbs-close">&times;</span>
+         <p class="bbs-header">New BehaviorSpace Experiment</p>
       </div>
-      <div class="modal-body">
-         <p>Vary variables as follows...</p>
-         <div id="bbs-variable-config" ><textarea class="nl-code-bbs">["#-phenotypes" [1 4 1]]</textarea></div>
-         <p>Repetitions: <input id="bbs-repetitions" style="width: 60px;"  type="number" value=2> </p>
-         <p>Measure runs with these reporters...</p>
-         <div id="bbs-metrics"><textarea class="nl-code-bbs">count turtles</textarea></div>
-         <p>Time Limit: <input id="bbs-time-limit" style="width: 60px;" type="number" value=10></p>
+      <div class="bbs-modal-body">
+         <p class="bbs-text">Vary variables as follows...</p>
+         <div id="bbs-variable-config" ><textarea class="nl-code-bbs">["initial-number" [60 10 100]]</textarea></div>
+         <p class="bbs-text">Repetitions: <input id="bbs-repetitions" style="width: 60px;"  type="number" value=2> </p>
+         <p class="bbs-text">Measure runs with these reporters...</p>
+         <div id="bbs-metrics"><textarea class="nl-code-bbs">pressure</textarea></div>
+         <p class="bbs-text">Time Limit: <input id="bbs-time-limit" style="width: 60px;" type="number" value=10></p>
       </div>
-      <div align="right" class="modal-footer">
+      <div align="right" class="bbs-modal-footer">
          <p></p>
          <button class="netlogo-widget netlogo-ugly-button" onclick="parseBBSConfig()">Run Experiment</button>
          <p></p>
       </div>
    </div>
-
 </div>
 
-<script>
-
+<script> /* BBS Front End Scripts */
 window.addEventListener("message", function (e) {
-  if (e.data.type === "baby-behaviorspace-results") {
-
-    //console.log(e.data.data);
-
-    DownloadJSON2CSV(e.data.data);
-
-    //console.log(JSON.stringify(e.data.data));
-  }
+   if (e.data.type === "baby-behaviorspace-results") {
+      DownloadJSON2CSV(e.data.data);
+   }
 });
+
+var bbsRunFlag = false;
+
+function openBBS() {
+   if (!bbsRunFlag) {
+      qsa(".nl-code-bbs").forEach(function (editorEl) {
+         var test = CodeMirror.fromTextArea(editorEl, {
+            mode:            'netlogo',
+            theme:           'netlogo-bbs',
+            styleActiveLine: true,
+            matchBrackets:   true,
+            viewportMargin:  Infinity,
+            showCursorWhenSelecting: true
+         });
+      });
+      bbsRunFlag = true;
+   }
+
+   // Get the modal
+   document.getElementById('bbs-dialog').style.display = "block";
+
+   qsa(".CodeMirror").forEach(function (cmEl) {
+      cmEl.CodeMirror.refresh();
+   });
+
+   // When the user clicks on <span> (x), close the modal
+   document.getElementsByClassName("bbs-close")[0].onclick = function() {
+      document.getElementById('bbs-dialog').style.display = "none";
+   }
+
+   // When the user clicks anywhere outside of the modal, close it
+   window.onclick = function(event) {
+      if (event.target == document.getElementById("bbs-dialog")) {
+         document.getElementById('bbs-dialog').style.display = "none";
+      }
+   }
+}
 
 function qsa(sel) {
    return Array.apply(null, document.querySelectorAll(sel));
 }
 
-
 /// TYPO IN DOCUMENTATION
-
-
 /*
 type BehaviorSpaceConfig =
-  {
-    parameterSet:        { type: "discreteCombos",   combos:    Array[Object[Any]]    }
-                       | { type: "cartesianProduct", variables: Array[VariableConfig] }
-    repetitionsPerCombo: Number
-    metrics:             Object[Metric]
-    setupCode:               () => Unit
-    goCode:                  () => Unit
-    stopConditionCode:       () => Boolean
-    iterationLimit:      Number
+{
+parameterSet:        { type: "discreteCombos",   combos:    Array[Object[Any]]    }
+| { type: "cartesianProduct", variables: Array[VariableConfig] }
+repetitionsPerCombo: Number
+metrics:             Object[Metric]
+setupCode:               () => Unit
+goCode:                  () => Unit
+stopConditionCode:       () => Boolean
+iterationLimit:      Number
 }
 
 type Metric = {
-  interval: Number
+interval: Number
 , reporter: () => Any
 }
 */
 
 function parseBBSConfig() {
    var rawParameters = document.getElementById("bbs-variable-config").children[1].CodeMirror.getValue();
-
    var rawMetrics = document.getElementById("bbs-metrics").children[1].CodeMirror.getValue();
-   //stopConditions = document.getElementById("bbs-stop-conditions").children[1].CodeMirror.getValue();
 
    var rawParameterLines = rawParameters.match(/[^\r\n]+/g);
-
    var variableSpaces = [];
+
+   var loopLine = "";
    for (var i = 0; i < rawParameterLines.length; i++) {
-      if (rawParameterLines[i] != "") {
-
-         var result = parseArgLine(rawParameterLines[i]);
-
-         if (result == -1) {
-            // PARSE ERROR
+      loopLine = rawParameterLines[i].trim();
+      if (loopLine != "") {
+         var result = parseArgLine(loopLine);
+         if (typeof(result) == "string") {
+            alert("Error!\nInvalid line in variable declaration:\n\n" + result + "\n\nPlease fix it and try again.");
+            return -1;
          }
-
          variableSpaces[variableSpaces.length] = result
       }
    }
@@ -217,28 +500,38 @@ function parseBBSConfig() {
    theBBSConfig.parameterSet = theParameterSet;
 
    var numRepetitions = document.getElementById("bbs-repetitions").value;
-   if ((numRepetitions == "") || (numRepetitions.includes("."))) {
+   if ((numRepetitions == "") || (numRepetitions.includes(".")) || (numRepetitions.includes("-"))) {
       // ERROR: Invalid repetitions
+      alert("Error: invalid number of reptitions.");
+      return -1;
    }
    theBBSConfig.repetitionsPerCombo = parseInt(numRepetitions);
 
    // HARD CODED SOME options
-
    theBBSConfig.setupCode = "setup";
    theBBSConfig.goCode = "go";
    theBBSConfig.stopConditionCode = "";
+   // HARD CODED OPTIONS ABOVE
 
    var theTickLimit = document.getElementById("bbs-time-limit").value;
-   if ((theTickLimit == "") || (theTickLimit.includes("."))) {
-      // ERROR: Invalid repetitions
+   if ((theTickLimit == "") || (theTickLimit.includes(".")) || (theTickLimit.includes("-"))) {
+      // ERROR: Invalid time limit
+      alert("Error: invalid time limit.")
+      return -1;
    }
+
    theBBSConfig.iterationLimit = parseInt(theTickLimit);
+
+   // LONG EXPERIMENT WARNING
+   if ((theBBSConfig.iterationLimit > 1000) || (theBBSConfig.repetitionsPerCombo > 50) ||
+      ((theBBSConfig.iterationLimit * theBBSConfig.repetitionsPerCombo) > 1000)) {
+         alert("Warning: this experiment might take a very long time.");
+   }
 
    var rawMetricLines = rawMetrics.match(/[^\r\n]+/g);
    var theMetrics = [];
    for (var i = 0; i < rawMetricLines.length; i++) {
       if (rawMetricLines[i] != "") {
-
          var temp = new Object();
          temp.reporter = rawMetricLines[i];
          temp.interval = theBBSConfig.iterationLimit; // ONLY MEASURES AT THE END
@@ -247,52 +540,15 @@ function parseBBSConfig() {
    }
    theBBSConfig.metrics = theMetrics;
 
-//   console.log(theBBSConfig);
-
+   // Ask backend to run the experiment
+   // EMBED FORM
+   //postMessage({ type: "run-baby-behaviorspace", config: theBBSConfig }, "*")
    document.getElementById('model-container').contentWindow.postMessage({ type: "run-baby-behaviorspace", config: theBBSConfig }, "*")
+   //WRAPPER FORM
 
-   //alert("Success");
+   // Make the BBS modal disappear
+   document.getElementById("bbs-dialog").style.display = "none";
 }
-
-// Get the modal
-var modal = document.getElementById('bbs-dialog');
-
-// Get the button that opens the modal
-var btn = document.getElementById("bbsBtn");
-
-// Get the <span> element that closes the modal
-var span = document.getElementsByClassName("close")[0];
-
-// When the user clicks the button, open the modal
-btn.onclick = function() {
-   modal.style.display = "block";
-}
-
-// When the user clicks on <span> (x), close the modal
-span.onclick = function() {
-   modal.style.display = "none";
-}
-
-// When the user clicks anywhere outside of the modal, close it
-window.onclick = function(event) {
-   if (event.target == modal) {
-      modal.style.display = "none";
-   }
-   qsa(".CodeMirror").forEach(function (cmEl) {
-      cmEl.CodeMirror.refresh();
-   });
-}
-
-qsa(".nl-code-bbs").forEach(function (editorEl) {
-   var test = CodeMirror.fromTextArea(editorEl, {
-      mode:            'netlogo',
-      theme:           'netlogo-bbs',
-      styleActiveLine: true,
-      matchBrackets:   true,
-      viewportMargin:  Infinity,
-      showCursorWhenSelecting: true
-   });
-});
 
 /*
 type VariableConfig = {
@@ -300,7 +556,6 @@ name:           String
 parameterSpace: { type: "discreteValues", values: Array[Any] }
 | { type: "range", min: Number, max: Number, interval: Number }
 }
-
 */
 
 // DOESN"T DEAL WITH CASE WHERE YOU HAVE MULTIPLE PARAMS ON SAME LINE
@@ -312,11 +567,10 @@ function parseArgLine(input) {
    input = input.trim();
    if ((input[0] != "[") || (input[input.length - 1] != "]")) {
       // ERROR: NO BRACKETS AROUND VARIABLE
-      alert("Error: no brackets around parameter space for variable.");
-      return -1;
+      return "no brackets around parameter space for variable in this line:\n" + input;
    }
 
-   var command = input.substring(1, input.length - 1)
+   var command = input.substring(1, input.length - 1);
    command = command.trim();
 
    var commandTree = command.split(" ");
@@ -325,10 +579,8 @@ function parseArgLine(input) {
    theName = theName.trim();
 
    if ((theName[0] != "\"") || (theName[theName.length - 1] != "\"")) {
-
       // ERROR: No QUOTES AROUND VARIABLE NAME
-      alert("Error: no quotes around variable name.");
-      return -1;
+      return "no quotes around variable name in this line:\n" + input;
    }
 
    // Save variable name and remove quotes
@@ -340,14 +592,12 @@ function parseArgLine(input) {
       var regex = /\[(.*?)\]/;
       var matched = regex.exec(command);
 
-      if (matched.length != 2) {
+      if ((matched == null)|| matched.length != 2) {
          // ERROR, NO VALID ITERATOR
-         alert("Error: no valid iterator found");
-         return -1;
+         return "no valid [min step max] found in this line:\n" + input;
       }
 
       var iteratorPart = matched[1];
-
       iteratorPart = iteratorPart.trim();
       var splitIterator = iteratorPart.split(" ");
 
@@ -360,19 +610,17 @@ function parseArgLine(input) {
 
       if (extractedValues.length != 3) {
          // ERROR: NO VALID ITERATOR FOUND
-         alert("Error: no valid iterator found.");
-         return -1;
+         return "Error: no valid [min step max] found in this line:\n" + input;
       }
 
-      var min  = extractedValues[0];
+      var min   = extractedValues[0];
       var step  = extractedValues[1];
-      var max = extractedValues[2];
+      var max   = extractedValues[2];
 
       theParamSpace.type = "range";
       theParamSpace.min = parseInt(min);
       theParamSpace.max = parseInt(max);
       theParamSpace.interval = parseInt(step);
-
    }
 
    // Otherwise it is just a list of options
@@ -386,61 +634,66 @@ function parseArgLine(input) {
 
       if (options.length == 0) {
          // ERROR: no options
-         alert("Error: you need to specify at least one value");
-         return -1;
+         return "you need to specify at least one value in this line:\n" + input;
       }
 
       theParamSpace.type = "discreteValues";
       theParamSpace.values = options;
    }
-
    variableConfig.parameterSpace = theParamSpace;
 
    return variableConfig;
 }
 
-/*
-[{"config":{"#-phenotypes":1,"initial-#-bacteria-per-phenotype":"6"},"results":{"0":{"count turtles":1052,"count bacteria":6},"10":{"count turtles":1052,"count bacteria":6}}},{"config":{"#-phenotypes":1,"initial-#-bacteria-per-phenotype":"6"},"results":{"0":{"count turtles":1052,"count bacteria":6},"10":{"count turtles":1052,"count bacteria":6}}},{"config":{"#-phenotypes":1,"initial-#-bacteria-per-phenotype":"8"},"results":{"0":{"count turtles":1056,"count bacteria":8},"10":{"count turtles":1056,"count bacteria":8}}},{"config":{"#-phenotypes":1,"initial-#-bacteria-per-phenotype":"8"},"results":{"0":{"count turtles":1056,"count bacteria":8},"10":{"count turtles":1056,"count bacteria":8}}},{"config":{"#-phenotypes":2,"initial-#-bacteria-per-phenotype":"6"},"results":{"0":{"count turtles":1064,"count bacteria":12},"10":{"count turtles":1064,"count bacteria":12}}},{"config":{"#-phenotypes":2,"initial-#-bacteria-per-phenotype":"6"},"results":{"0":{"count turtles":1064,"count bacteria":12},"10":{"count turtles":1064,"count bacteria":12}}},{"config":{"#-phenotypes":2,"initial-#-bacteria-per-phenotype":"8"},"results":{"0":{"count turtles":1072,"count bacteria":16},"10":{"count turtles":1072,"count bacteria":16}}},{"config":{"#-phenotypes":2,"initial-#-bacteria-per-phenotype":"8"},"results":{"0":{"count turtles":1072,"count bacteria":16},"10":{"count turtles":1072,"count bacteria":16}}}]
-*/
-
 function DownloadJSON2CSV(objArray){
 
-      var parameters = [];
-      var metrics = [];
+   var parameters = [];
+   var metrics = [];
 
-      var csv = "[run number]";
+   var csv = "[run number]";
 
-      for (variable in objArray[0].config) {
-         csv += ("," + variable);
-         parameters[parameters.length] = variable;
-      }
-      csv += (",[step]");
-
-      // THIS WOULD NEED TO CHANGE IF WE DON'T HAVE 0th TICK
-      for (variable in objArray[0].results["0"]) {
-         csv += ("," + variable);
-         metrics[metrics.length] = variable;
-      }
-
-      csv += '\r\n';
-
-      for (var i = 0; i < objArray.length; i++) {
-
-         var line = "" + i;
-         for (var j = 0; j < parameters.length; j++) {
-            line += "," + objArray[i].config[parameters[j]];
-         }
-
-         for (stepNum in objArray[i].results) {
-            var stepSubsection = "," + stepNum;
-            for (var j = 0; j < metrics.length; j++) {
-               stepSubsection += "," + objArray[i].results[stepNum][metrics[j]];
-            }
-            csv += line + stepSubsection + '\r\n';
-         }
-      }
-
-      window.open( "data:text/csv;charset=utf-8," + escape(csv))
+   for (variable in objArray[0].config) {
+      csv += ("," + variable);
+      parameters[parameters.length] = variable;
    }
+   csv += (",[step]");
+
+   // THIS WOULD NEED TO CHANGE IF WE DON'T HAVE 0th TICK
+   for (variable in objArray[0].results["0"]) {
+      csv += ("," + variable);
+      metrics[metrics.length] = variable;
+   }
+
+   csv += '\r\n';
+
+   for (var i = 0; i < objArray.length; i++) {
+
+      var line = "" + (i + 1);
+      for (var j = 0; j < parameters.length; j++) {
+         line += "," + objArray[i].config[parameters[j]];
+      }
+
+      for (stepNum in objArray[i].results) {
+         if (stepNum == "0") { continue; }
+         var stepSubsection = "," + stepNum;
+         for (var j = 0; j < metrics.length; j++) {
+            stepSubsection += "," + objArray[i].results[stepNum][metrics[j]];
+         }
+         csv += line + stepSubsection + '\r\n';
+      }
+   }
+
+   var fileName = null;
+
+   while (fileName == null) {
+      fileName = window.prompt("Please enter a name your results file...", "Connected-Chemistry-4-Experiment");
+   }
+
+   exportBlob = new Blob([csv], {
+     type: "data:text/csv;charset=utf-8"
+   });
+
+   return saveAs(exportBlob, fileName + ".csv");
+}
 </script>
 </html>
