@@ -390,10 +390,10 @@
       </div>
       <div class="bbs-modal-body">
          <p class="bbs-text">Vary variables as follows...</p>
-         <div id="bbs-variable-config" ><textarea class="nl-code-bbs">["initial-number" [60 10 100]]</textarea></div>
+         <div id="bbs-variable-config" ><textarea class="nl-code-bbs"></textarea></div>
          <p class="bbs-text">Repetitions: <input id="bbs-repetitions" style="width: 60px;"  type="number" value=2> </p>
          <p class="bbs-text">Measure runs with these reporters...</p>
-         <div id="bbs-metrics"><textarea class="nl-code-bbs">pressure</textarea></div>
+         <div id="bbs-metrics"><textarea class="nl-code-bbs"></textarea></div>
          <p class="bbs-text">Time Limit: <input id="bbs-time-limit" style="width: 60px;" type="number" value=10></p>
       </div>
       <div align="right" class="bbs-modal-footer">
@@ -677,6 +677,7 @@ function DownloadJSON2CSV(objArray){
       }
 
       for (stepNum in objArray[i].results) {
+         // Skip 0th tick measurements
          if (stepNum == "0") { continue; }
          var stepSubsection = "," + stepNum;
          for (var j = 0; j < metrics.length; j++) {
@@ -689,7 +690,7 @@ function DownloadJSON2CSV(objArray){
    var fileName = null;
 
    while (fileName == null) {
-      fileName = window.prompt("Please enter a name your results file...", "Connected-Chemistry-4-Experiment");
+      fileName = window.prompt("Please enter a name for your results file...", "MODEL NAME HERE");
    }
 
    exportBlob = new Blob([csv], {
