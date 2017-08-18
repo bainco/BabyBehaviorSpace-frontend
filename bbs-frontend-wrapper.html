@@ -378,7 +378,7 @@
 
 <button onclick="openBBS()">New Experiment</button><br>
 
-<iframe height="1000px" width="1000px" id="model-container" src="Connected-Chemistry-6-Volume-and-Pressure-with-BS.html"></iframe>
+<iframe height="1000px" width="1000px" id="model-container" src="embed_examples/Connected-Chemistry-4-Number-and-Pressure-with-BBS.html"></iframe>
 
 <!-- BBS Dialog -->
 <div id="bbs-dialog" class="bbs-modal">
@@ -391,10 +391,10 @@
       <div class="bbs-modal-body">
          <p class="bbs-text">Vary variables as follows...</p>
          <div id="bbs-variable-config" ><textarea class="nl-code-bbs"></textarea></div>
-         <p class="bbs-text">Repetitions: <input id="bbs-repetitions" style="width: 60px;"  type="number" value=2> </p>
+         <p class="bbs-text">Repetitions: <input id="bbs-repetitions" style="width: 60px;"  type="number" value=4> </p>
          <p class="bbs-text">Measure runs with these reporters...</p>
          <div id="bbs-metrics"><textarea class="nl-code-bbs"></textarea></div>
-         <p class="bbs-text">Time Limit: <input id="bbs-time-limit" style="width: 60px;" type="number" value=10></p>
+         <p class="bbs-text">Time Limit: <input id="bbs-time-limit" style="width: 60px;" type="number" value=5></p>
       </div>
       <div align="right" class="bbs-modal-footer">
          <p></p>
@@ -511,7 +511,7 @@ function parseBBSConfig() {
    theBBSConfig.setupCode = "setup";
    theBBSConfig.goCode = "go";
    theBBSConfig.stopConditionCode = "";
-   // HARD CODED OPTIONS ABOVE
+   // HARD CODED OPTIONS ABOVE (except stopCondition)
 
    var theTickLimit = document.getElementById("bbs-time-limit").value;
    if ((theTickLimit == "") || (theTickLimit.includes(".")) || (theTickLimit.includes("-"))) {
@@ -520,11 +520,17 @@ function parseBBSConfig() {
       return -1;
    }
 
-   theBBSConfig.iterationLimit = parseInt(theTickLimit);
+   // iterationLimit defines the number of times you run go. In the case of
+   // Connected Chemistry Models, they use partial ticks so ticks doesn't
+   // correspond to the number of go's. So we do a work around by artificially
+   // inflating the iterationLimit (1000) and then converting the "tick limit"
+   // to a stop condition.
+   theBBSConfig.iterationLimit = 10000;
+   theBBSConfig.stopConditionCode = "ticks > " + parseInt(theTickLimit);
 
    // LONG EXPERIMENT WARNING
-   if ((theBBSConfig.iterationLimit > 1000) || (theBBSConfig.repetitionsPerCombo > 50) ||
-   ((theBBSConfig.iterationLimit * theBBSConfig.repetitionsPerCombo) > 1000)) {
+   if ((parseInt(theTickLimit) > 1000) || (theBBSConfig.repetitionsPerCombo > 50) ||
+   ((parseInt(theTickLimit) * theBBSConfig.repetitionsPerCombo) > 1000)) {
       var r = confirm("Warning: this experiment might take a very long time.");
       if (r == false) {
          return -1;
@@ -533,16 +539,23 @@ function parseBBSConfig() {
 
    var rawMetricLines = rawMetrics.match(/[^\r\n]+/g);
    var theMetrics = [];
+
+   // FIX FOR CONNECTED CHEMISTRY
+   var time = new Object();
+   time.reporter = "ticks";
+   time.interval = 1;
+   theMetrics[theMetrics.length] = time;
+
    for (var i = 0; i < rawMetricLines.length; i++) {
       if (rawMetricLines[i] != "") {
          var temp = new Object();
          temp.reporter = rawMetricLines[i];
-         temp.interval = theBBSConfig.iterationLimit; // ONLY MEASURES AT THE END
+         temp.interval = 1; // ONLY MEASURES AT THE END
          theMetrics[theMetrics.length] = temp;
       }
    }
-   theBBSConfig.metrics = theMetrics;
 
+   theBBSConfig.metrics = theMetrics;
    // Ask backend to run the experiment
    // EMBED FORM
    //postMessage({ type: "run-baby-behaviorspace", config: theBBSConfig }, "*")
@@ -659,7 +672,7 @@ function DownloadJSON2CSV(objArray){
       csv += ("," + variable);
       parameters[parameters.length] = variable;
    }
-   csv += (",[step]");
+   //csv += (",[step]");
 
    // THIS WOULD NEED TO CHANGE IF WE DON'T HAVE 0th TICK
    for (variable in objArray[0].results["0"]) {
@@ -676,21 +689,34 @@ function DownloadJSON2CSV(objArray){
          line += "," + objArray[i].config[parameters[j]];
       }
 
-      for (stepNum in objArray[i].results) {
+      // BELOW IS HARD CODED CONNECTED CHEMISTRY FIX
+      // Basically, we only use the last step
+      //for (stepNum in objArray[i].results) {
          // Skip 0th tick measurements
-         if (stepNum == "0") { continue; }
-         var stepSubsection = "," + stepNum;
+         //if (stepNum == "0") { continue; }
+         //var stepSubsection = "," + stepNum;
+         // FIX FOR CONNECTED CHEMISTRY PARTIAL TICKS (don't show [step])
+
+         var keys = Object.keys(objArray[i].results);
+         var lastEntryIndex = keys.length - 1;
+
+         var stepSubsection = "";
          for (var j = 0; j < metrics.length; j++) {
-            stepSubsection += "," + objArray[i].results[stepNum][metrics[j]];
+            if (metrics[j] == "ticks") {
+               stepSubsection += "," + parseInt(document.getElementById("bbs-time-limit").value);
+            }
+            else {
+               stepSubsection += "," + objArray[i].results[lastEntryIndex][metrics[j]];
+            }
          }
          csv += line + stepSubsection + '\r\n';
-      }
+      //}
    }
 
    var fileName = null;
 
    while (fileName == null) {
-      fileName = window.prompt("Please enter a name for your results file...", "MODEL NAME HERE");
+      fileName = window.prompt("Please enter a name for your results file...", "Connected-Chemistry-4-Experiment");
    }
 
    exportBlob = new Blob([csv], {
